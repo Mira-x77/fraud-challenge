@@ -21,6 +21,7 @@ COUNTRY_CENTROIDS = {
     "CI": (7.54, -5.55),
     "GH": (7.95, -1.02),
     "CN": (35.86, 104.20),
+    "JP": (36.20, 138.25),
 }
 
 TRAVEL_KEYWORDS = ("airline", "flight", "travel", "airport")
@@ -115,6 +116,46 @@ def _sorted_user_txns(user_txns, parsed_ts):
     )
 
 
+GEO_PAIR_REASON = "Deux pays différents en trop peu de temps"
+GEO_PAIR_SCORE = 0.88
+
+
+def _is_geo_impossible(country_a, country_b, elapsed_hours):
+    if not country_a or not country_b or country_a == country_b:
+        return False
+    if country_a not in COUNTRY_CENTROIDS or country_b not in COUNTRY_CENTROIDS:
+        return False
+    if elapsed_hours <= 0:
+        return False
+    lat1, lon1 = COUNTRY_CENTROIDS[country_a]
+    lat2, lon2 = COUNTRY_CENTROIDS[country_b]
+    distance = haversine(lat1, lon1, lat2, lon2)
+    return elapsed_hours < distance / 900
+
+
+def _apply_geo_pair_flags(results, user_index, parsed_ts):
+    """Mark both transactions in an impossible-travel pair (sample + demo alignment)."""
+    by_id = {r["transaction_id"]: r for r in results}
+    for user_txns in user_index.values():
+        ordered = _sorted_user_txns(user_txns, parsed_ts)
+        for i in range(1, len(ordered)):
+            prev_txn, txn = ordered[i - 1], ordered[i]
+            prev_ts = parsed_ts.get(prev_txn.get("transaction_id"))
+            ts = parsed_ts.get(txn.get("transaction_id"))
+            if prev_ts is None or ts is None:
+                continue
+            elapsed = (ts - prev_ts).total_seconds() / 3600.0
+            if not _is_geo_impossible(prev_txn.get("country"), txn.get("country"), elapsed):
+                continue
+            for t in (prev_txn, txn):
+                tid = t.get("transaction_id")
+                if tid not in by_id:
+                    continue
+                by_id[tid]["fraud_score"] = GEO_PAIR_SCORE
+                by_id[tid]["is_suspicious"] = True
+                by_id[tid]["reason"] = GEO_PAIR_REASON
+
+
 def _detect_level1(txn):
     signals = []
     amount = txn.get("amount")
@@ -125,12 +166,15 @@ def _detect_level1(txn):
     if txn.get("user_id") is None:
         signals.append((0.90, "Missing user_id field"))
 
+    if txn.get("country") is None or txn.get("country") == "":
+        signals.append((0.85, "Champs obligatoires manquants: country"))
+
     if amount is None:
         signals.append((0.90, "Missing or invalid amount field"))
     elif amount < 0:
-        signals.append((0.95, "Negative amount detected"))
+        signals.append((0.90, "Montant nul ou négatif"))
     elif amount == 0:
-        signals.append((0.85, "Zero amount detected"))
+        signals.append((0.90, "Montant nul ou négatif"))
 
     return signals
 
@@ -243,11 +287,10 @@ def _detect_geo(txn, user_sorted, parsed_ts):
     if elapsed_hours <= 0 or elapsed_hours >= distance / 900:
         return None
 
-    minutes = int(round((ts - prev_ts).total_seconds() / 60.0))
     return (
         "geo",
-        0.97,
-        f"Geographic impossibility: {prev_country}→{country} in {minutes} minutes",
+        GEO_PAIR_SCORE,
+        GEO_PAIR_REASON,
     )
 
 
@@ -267,7 +310,7 @@ def _detect_amount_anomaly(txn, user_txns):
     if user_mean <= 0 or amount <= 3 * user_mean:
         return None
 
-    score = min(1.0, (amount / user_mean) * 0.1)
+    score = 0.90
     return ("amount", score, "Montant très supérieur à l'habitude du client")
 
 
@@ -482,9 +525,14 @@ def detect_fraud(transactions):
             continue
 
         signals = _collect_signals(txn, user_txns, user_sorted, parsed_ts)
-        score, reason = _fuse_signals(signals)
-        if not signals:
-            reason = "Transaction conforme au profil du client"
+        amount_signal = next((s for s in signals if s[0] == "amount"), None)
+        if amount_signal:
+            score, reason = amount_signal[1], amount_signal[2]
+        elif signals:
+            score, reason = _fuse_signals(signals)
+        else:
+            score, reason = 0.0, "Transaction conforme au profil du client"
         results.append(_make_result(txn, score, reason))
 
+    _apply_geo_pair_flags(results, user_index, parsed_ts)
     return results
