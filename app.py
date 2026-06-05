@@ -194,6 +194,49 @@ def _inject_global_css(mode: str = "broadcast") -> None:
                 padding: 1rem;
             }}
 
+            .globe-scan-panel {{
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: stretch;
+                min-height: 440px;
+                padding-bottom: 1rem !important;
+            }}
+            .globe-scan-label {{
+                font-size: 0.65rem;
+                letter-spacing: 0.14em;
+                margin-bottom: 0.5rem;
+                width: 100%;
+                text-align: center;
+                flex-shrink: 0;
+            }}
+            .globe-scan-stage {{
+                flex: 1 1 auto;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 100%;
+                min-height: 380px;
+                position: relative;
+            }}
+            .globe-scan-wrap {{
+                width: min(320px, 96%) !important;
+                height: min(320px, 96%) !important;
+                margin: 0 auto !important;
+            }}
+            .globe-scan-wrap .fs-orbit {{
+                inset: -14px;
+            }}
+            .globe-scan-wrap .fs-orbit-2 {{
+                inset: -26px;
+            }}
+            .globe-scan-wrap .fs-orbit-3 {{
+                inset: -40px;
+            }}
+            .globe-scan-wrap .fs-radar {{
+                inset: -50px;
+            }}
+
             .fs-globe-wrap {{
                 position: relative;
                 width: min(340px, 55vw);
@@ -451,10 +494,18 @@ def _inject_global_css(mode: str = "broadcast") -> None:
     )
 
 
-def _globe_html(globe_b64: str, globe_mime: str, size: int = 340) -> str:
+def _globe_html(
+    globe_b64: str,
+    globe_mime: str,
+    size: int = 340,
+    wrap_class: str = "fs-globe-wrap",
+) -> str:
     px = f"{size}px"
+    style = f"width:{px};height:{px};margin:0 auto"
+    if "globe-scan-wrap" in wrap_class:
+        style = ""
     return f"""
-    <div class="fs-globe-wrap" style="width:{px};height:{px};margin:0 auto">
+    <div class="{wrap_class}" style="{style}">
         <div class="fs-radar"></div>
         <div class="fs-orbit"></div>
         <div class="fs-orbit fs-orbit-2"></div>
@@ -668,9 +719,11 @@ def render_results(transactions: list[dict], results: list[dict]) -> None:
                 <div class="metric-num">{protected:,.0f} XOF</div>
             </div>
 
-            <div class="cyber-box span-4" style="text-align:center">
-                <div style="font-size:0.65rem;letter-spacing:0.12em;margin-bottom:0.5rem">GLOBAL SCAN</div>
-                {_globe_html(globe_b64, globe_mime, size=120)}
+            <div class="cyber-box span-4 globe-scan-panel">
+                <div class="globe-scan-label">GLOBAL SCAN</div>
+                <div class="globe-scan-stage">
+                    {_globe_html(globe_b64, globe_mime, wrap_class="fs-globe-wrap globe-scan-wrap")}
+                </div>
             </div>
 
             <div class="cyber-box span-8">
